@@ -2,8 +2,8 @@ use std::{env, str::FromStr, path::Path};
 
 #[derive(Debug)]
 pub struct Setup {
-    root_dir: String,
-    deep: u8,
+    pub root_dir: String,
+    pub deep: u8,
 }
 
 impl Setup {
@@ -52,7 +52,7 @@ impl Setup {
 
     fn appropriate_root_path(root_path: &str) -> Result<(), ()> {
         Path::new(root_path)
-            .exists()
+            .is_dir()
             .then_some(())
             .ok_or_else(|| ())
     }

@@ -1,0 +1,83 @@
+use std::{fs, io, path::Path};
+use crate::setup::Setup;
+
+pub struct Engine {
+    setup: Setup,
+    search_string: String,
+    base_layer: Vec<String>,
+    search_layers: Vec<Vec<SearchResult>>,
+}
+
+pub struct SearchResult {
+    pub file_id: u32,
+    pub search_start: u16, // idx where we can start new search
+}
+
+impl Engine {
+    pub fn new(setup: Setup) -> Self {
+        let mut engine = Engine {
+            setup: setup,
+            search_string: String::new(),
+            base_layer: Vec::new(),
+            search_layers: Vec::new(), 
+        };
+        
+        // create base layer
+        let root_dir = engine.setup.root_dir.clone();
+        if let Err(e) = engine.find_all_files(Path::new(&root_dir), 0) {
+            panic!("error: {e}");
+        }
+
+        // make first search_layer for ""
+        engine.search_layers.push(Vec::new());
+        for id in 0..engine.base_layer.len() {
+            engine.search_layers[0].push(SearchResult { file_id: id as u32, search_start: 0 });
+        }
+
+        engine
+    }
+
+    fn find_all_files(&mut self, path: &Path, deep: u8) -> io::Result<()> {
+        for entry in fs::read_dir(path)? {
+            let entry = entry?;
+            let file_name = entry.path().to_string_lossy().to_string();
+            self.base_layer.push(file_name);
+
+            if entry.file_type()?.is_dir() && deep + 1 < self.setup.deep {
+                self.find_all_files(&entry.path(), deep + 1)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn create_new_layer(&self, chr: char) -> Vec<SearchResult> {
+        // creates a new layer after adding new char
+
+        let mut new_layer: Vec<SearchResult> = Vec::new();
+        if let Some(layer) = self.search_layers.last() {
+            for element in layer {
+                let file_id = element.file_id as usize;
+                let start = element.search_start as usize;
+
+                if let Some(rel_pos) = self.base_layer[file_id][start..].find(chr) {
+                    new_layer.push(SearchResult { file_id: element.file_id, search_start: element.search_start + rel_pos as u16 + 1 });
+                }
+            }
+        }
+
+        new_layer
+    }
+
+    pub fn push_char(&mut self, chr: char) {
+        self.search_string.push(chr);
+
+        let layer = self.create_new_layer(chr);
+        self.search_layers.push(layer);
+    }
+
+    pub fn pop_char(&mut self) {
+        self.search_layers.pop();
+        self.search_string.pop();
+    }
+}
