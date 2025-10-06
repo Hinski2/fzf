@@ -3,7 +3,6 @@ use crate::setup::Setup;
 
 pub struct Engine {
     setup: Setup,
-    search_string: String,
     base_layer: Vec<String>,
     search_layers: Vec<Vec<SearchResult>>,
 }
@@ -17,7 +16,6 @@ impl Engine {
     pub fn new(setup: Setup) -> Self {
         let mut engine = Engine {
             setup: setup,
-            search_string: String::new(),
             base_layer: Vec::new(),
             search_layers: Vec::new(), 
         };
@@ -69,15 +67,31 @@ impl Engine {
         new_layer
     }
 
-    pub fn push_char(&mut self, chr: char) {
-        self.search_string.push(chr);
+    pub fn get_items(&self, no_items: usize) -> Vec<String> {
+        // collects top no_items paths strings 
 
+        let mut names = Vec::<String>::new();
+
+        if let Some(layer) = self.search_layers.last() {
+            for search_result in layer {
+                if names.len() + 1 > no_items {
+                    break;
+                }
+                names.push(self.base_layer[search_result.file_id as usize].clone());
+            }    
+        };
+
+        names
+    }
+
+    pub fn push_char(&mut self, chr: char) {
         let layer = self.create_new_layer(chr);
         self.search_layers.push(layer);
     }
 
     pub fn pop_char(&mut self) {
-        self.search_layers.pop();
-        self.search_string.pop();
+        if self.search_layers.len() > 1 {
+            self.search_layers.pop();
+        }
     }
 }
