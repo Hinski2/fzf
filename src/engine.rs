@@ -1,5 +1,6 @@
-use std::{fs, io, path::Path};
+use std::{cmp::min, fs, io, path::Path};
 use crate::setup::Setup;
+use crate::viewer::Viewer;
 
 pub struct Engine {
     setup: Setup,
@@ -8,11 +9,18 @@ pub struct Engine {
 }
 
 pub struct SearchResult {
-    pub file_id: u32,
+    pub file_id: usize,
     pub search_start: u16, // idx where we can start new search
+    pub first_occ: usize,
 }
 
+
+
 impl Engine {
+    pub fn results_size(&self) -> usize {
+        self.search_layers.last().unwrap().len()
+    }
+
     pub fn new(setup: Setup) -> Self {
         let mut engine = Engine {
             setup: setup,
@@ -29,7 +37,7 @@ impl Engine {
         // make first search_layer for ""
         engine.search_layers.push(Vec::new());
         for id in 0..engine.base_layer.len() {
-            engine.search_layers[0].push(SearchResult { file_id: id as u32, search_start: 0 });
+            engine.search_layers[0].push(SearchResult { file_id: id, search_start: 0, first_occ: usize::MAX });
         }
 
         engine
@@ -59,7 +67,7 @@ impl Engine {
                 let start = element.search_start as usize;
 
                 if let Some(rel_pos) = self.base_layer[file_id][start..].find(chr) {
-                    new_layer.push(SearchResult { file_id: element.file_id, search_start: element.search_start + rel_pos as u16 + 1 });
+                    new_layer.push(SearchResult { file_id: element.file_id, search_start: element.search_start + rel_pos as u16 + 1, first_occ: min(element.first_occ, element.search_start as usize + rel_pos )});
                 }
             }
         }
@@ -85,7 +93,19 @@ impl Engine {
     }
 
     pub fn push_char(&mut self, chr: char) {
-        let layer = self.create_new_layer(chr);
+        let mut layer = self.create_new_layer(chr); 
+
+        layer.sort_by(|a, b| {
+            let len_a = a.search_start as usize - a.first_occ;
+            let len_b = b.search_start as usize - b.first_occ;
+
+            if len_a == len_b {
+                self.base_layer[a.file_id].len().cmp(&self.base_layer[b.file_id].len())
+            } else {
+                len_a.cmp(&len_b)
+            }
+        });
+
         self.search_layers.push(layer);
     }
 

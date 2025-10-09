@@ -1,10 +1,25 @@
 use std::{cmp::{max, min}, fs::{self, File}, io::{self, BufRead, BufReader}, path::Path, str};
 use crossterm::event::{self, Event, KeyEvent, KeyEventKind, KeyCode};
 use ratatui::{
-    buffer::Buffer, layout::{Constraint, Direction, Layout, Rect}, style::{Color, Style}, widgets::{block::title, Block, Borders, List, ListItem, Paragraph, Widget}, DefaultTerminal, Frame
+    buffer::Buffer, layout::{Constraint, Direction, Layout, Rect}, style::{Color, Style}, widgets::{Block, Borders, List, ListItem, Paragraph, Widget}, DefaultTerminal, Frame
 };
+use ansi_to_tui::IntoText;
 
-use crate::engine::{Engine, SearchResult};
+use crate::{engine::Engine, viewer};
+use crate::viewer::Viewer;
+
+
+#[derive(PartialEq)]
+enum AppMode {
+    Left,
+    Right(ViewerMode),
+}
+
+#[derive(PartialEq)]
+enum ViewerMode {
+    Normal,
+    Search,
+}
 
 pub struct App {
     search_string: String,
@@ -12,11 +27,23 @@ pub struct App {
     exit: bool,
     selected_item_number: usize, 
     selected_item_name: String,
+
+    app_mode: AppMode,
+    viewer: Option<Viewer>,
+    update_viewer: bool,
 }
 
 impl App {
     pub fn new(engine: Engine) -> Self {
-        App {search_string: String::new(), engine: engine, exit: false, selected_item_number: 0, selected_item_name: String::new()}
+        App {search_string: String::new(),
+            engine: engine,
+            exit: false,
+            selected_item_number: 0,
+            selected_item_name: String::new(),
+            app_mode: AppMode::Left,
+            viewer: None,
+            update_viewer: false,
+        }
     }
 
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
@@ -45,22 +72,39 @@ impl App {
 
     fn handle_key_event(&mut self, key_event: KeyEvent) {
         match key_event.code {
+            KeyCode::Backspace if self.app_mode == AppMode::Left => self.pop_char(),
+            KeyCode::Backspace  => self.viewer.as_mut().unwrap().pop_char(),
+
+            KeyCode::Char(chr) if self.app_mode == AppMode::Left => self.add_char(chr),
+            KeyCode::Char(chr) => self.viewer.as_mut().unwrap().add_char(chr),
+
+            KeyCode::Up if self.app_mode == AppMode::Left => self.up_char(),
+            KeyCode::Up => self.viewer.as_mut().unwrap().up_char(),
+
+            KeyCode::Down if self.app_mode == AppMode::Left => self.down_char(),
+            KeyCode::Down => self.viewer.as_mut().unwrap().down_char(),
+
+            KeyCode::Tab => self.switch_app_mode(),
             KeyCode::Esc => self.exit(),
-            KeyCode::Backspace => self.pop_char(),
-            KeyCode::Char(chr) => self.add_char(chr),
-            KeyCode::Up => self.up_char(),
-            KeyCode::Down => self.down_char(),
             _ => {}
         }
     }
+
+    fn switch_app_mode(&mut self) {
+        self.app_mode = if self.app_mode == AppMode::Left {AppMode::Right(ViewerMode::Normal)} else {AppMode::Left};
+    }
     
     fn up_char(&mut self) {
-       self.selected_item_number += 1; 
+        if self.selected_item_number + 1 < self.engine.results_size() {
+            self.selected_item_number += 1; 
+            self.update_viewer = true;
+        }
     }
 
     fn down_char(&mut self) {
         if self.selected_item_number > 0 {
             self.selected_item_number -= 1;
+            self.update_viewer = true;
         }
     }
 
@@ -90,6 +134,7 @@ impl App {
 
         self.selected_item_number = min(self.selected_item_number, items_string.len() - 1);
         self.selected_item_name = items_string[self.selected_item_number].clone();
+
 
         // draw top empty lines
         for _ in 0..(h - items_string.len()) {
@@ -124,7 +169,7 @@ impl App {
         Ok(str::from_utf8(&bytes).is_ok())
     }
 
-    fn handle_right_area(&self, area: &Rect, buf: &mut Buffer) -> io::Result<()> {
+    fn handle_right_area(&mut self, area: &Rect, buf: &mut Buffer) -> io::Result<()> {
         if Path::new(&self.selected_item_name).is_dir() {
             return Ok(())
         }
@@ -133,19 +178,28 @@ impl App {
             return Ok(());
         }
 
+        if self.update_viewer {
+            self.viewer = Some(Viewer::new(&self.selected_item_name).unwrap());
+            self.update_viewer = false;
+        }
+
+        if let None = self.viewer {
+            self.update_viewer = true;
+            return Ok(())
+        }
+
         // get content
         let h = area.height as usize;
-        let file = File::open(&self.selected_item_name)?;
-        let reader = BufReader::new(file);
-    
-        let lines: Vec<String> = reader
-            .lines()
-            .take(h)
-            .collect::<Result<_, _>>()?;
+        let start = self.viewer.as_mut().unwrap().display_start;
+
+        let lines = self.viewer
+            .as_mut()
+            .unwrap()
+            .get_lines(start, h);
 
         let items: Vec<ListItem> = lines 
             .into_iter()
-            .map(|e| ListItem::new(e))
+            .map(|ansi_line| ListItem::new(ansi_line.into_text().unwrap()))
             .collect();
         
         let list = List::new(items)
@@ -180,30 +234,43 @@ impl Widget for &mut App {
         App::handle_list_area(self, &list_area, buf);
 
         // fill input area
-        let input = Paragraph::new(self.search_string.as_str())
+        let content = match self.app_mode {
+            AppMode::Left => self.search_string.as_str(),
+            AppMode::Right(_) => self.search_string.as_str(),
+        };
+
+        let input = Paragraph::new(content)
             .style(Style::default().fg(Color::Blue))
             .block(
                 Block::bordered()
                 .title("Input")
                 .border_style(Style::default().fg(Color::White))
             );
+        input.render(input_area, buf);
 
         // fill right area
         if let Err(e) = App::handle_right_area(self, &right ,buf) {
             panic!("Error: {e}")
         };
 
-        input.render(input_area, buf);
 
         // render borders
-        let white_block = || {
+        let block = |color: Color| {
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::White))
+                .border_style(Style::default().fg(color))
         };
 
-        white_block().render(list_area, buf);
-        white_block().render(input_area, buf);
-        white_block().render(right, buf);
+        block(Color::White).render(input_area, buf);
+        match self.app_mode {
+            AppMode::Left => {
+                block(Color::Blue).render(list_area, buf);
+                block(Color::White).render(right, buf);
+            }
+            AppMode::Right(_) => {
+                block(Color::White).render(list_area, buf);
+                block(Color::Blue).render(right, buf);
+            }
+        }
     }
 }
