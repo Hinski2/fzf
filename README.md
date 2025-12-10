@@ -5,6 +5,13 @@ Unlike standard `fzf`, this tool focuses on file navigation and previewing. It f
 
 --- 
 
+## Features
+* **Split-pane Layout:** Browse the file list on the left, preview content on the right.
+* **Fuzzy Search:** Rapidly filter files.
+* **Syntax Highlighting:** Automatic syntax coloring for previews in the right.
+* **Dual Modes:** Switch focus between the file list (filtering) and the preview pane (reading).
+* **Vim-like Navigation:** Search within the previewed file using `/`, `n`, and `N`.
+
 ---
 
 ## How to run project
