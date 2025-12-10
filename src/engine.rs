@@ -1,6 +1,5 @@
 use std::{cmp::min, fs, io, path::Path};
 use crate::setup::Setup;
-use crate::viewer::Viewer;
 
 pub struct Engine {
     setup: Setup,

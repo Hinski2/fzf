@@ -71,27 +71,48 @@ impl App {
     }
 
     fn handle_key_event(&mut self, key_event: KeyEvent) {
-        match key_event.code {
-            KeyCode::Backspace if self.app_mode == AppMode::Left => self.pop_char(),
-            KeyCode::Backspace  => self.viewer.as_mut().unwrap().pop_char(),
-
-            KeyCode::Char(chr) if self.app_mode == AppMode::Left => self.add_char(chr),
-            KeyCode::Char(chr) => self.viewer.as_mut().unwrap().add_char(chr),
-
-            KeyCode::Up if self.app_mode == AppMode::Left => self.up_char(),
-            KeyCode::Up => self.viewer.as_mut().unwrap().up_char(),
-
-            KeyCode::Down if self.app_mode == AppMode::Left => self.down_char(),
-            KeyCode::Down => self.viewer.as_mut().unwrap().down_char(),
-
-            KeyCode::Tab => self.switch_app_mode(),
-            KeyCode::Esc => self.exit(),
-            _ => {}
+        match self.app_mode {
+            AppMode::Left => match key_event.code {
+                KeyCode::Backspace => self.pop_char(),
+                KeyCode::Char(chr) => self.add_char(chr),
+                KeyCode::Up => self.up_char(),
+                KeyCode::Down => self.down_char(),
+                _ => {},
+            },
+            AppMode::Right(ViewerMode::Normal) => match key_event.code {
+                KeyCode::Up => self.viewer.as_mut().unwrap().up_char(),
+                KeyCode::Down => self.viewer.as_mut().unwrap().down_char(),
+                KeyCode::Char('/') => self.switch_viewer_mode(),
+                KeyCode::Char('n') => self.viewer.as_mut().unwrap().go_to_next_search(),
+                KeyCode::Char('N') => self.viewer.as_mut().unwrap().go_to_prev_search(),
+                _ => {},
+            },
+            AppMode::Right(ViewerMode::Search) => match key_event.code {
+                KeyCode::Backspace => self.viewer.as_mut().unwrap().pop_char(),
+                KeyCode::Char(chr) => self.viewer.as_mut().unwrap().add_char(chr),
+                KeyCode::Enter => self.enter_char(),
+                _ => {},
+            },
         }
+
+        match key_event.code {
+                KeyCode::Esc => self.exit(),
+                KeyCode::Tab => self.switch_app_mode(),
+                _ => {},
+        }
+    }
+
+    fn enter_char(&mut self) {
+        self.switch_viewer_mode();
+        self.viewer.as_mut().unwrap().search();
     }
 
     fn switch_app_mode(&mut self) {
         self.app_mode = if self.app_mode == AppMode::Left {AppMode::Right(ViewerMode::Normal)} else {AppMode::Left};
+    }
+
+    fn switch_viewer_mode(&mut self) {
+        self.app_mode = if self.app_mode == AppMode::Right(ViewerMode::Search) {AppMode::Right(ViewerMode::Normal)} else {AppMode::Right(ViewerMode::Search)};
     }
     
     fn up_char(&mut self) {
@@ -192,15 +213,21 @@ impl App {
         let h = area.height as usize;
         let start = self.viewer.as_mut().unwrap().display_start;
 
-        let lines = self.viewer
+        let (lines, colored) = self.viewer
             .as_mut()
             .unwrap()
             .get_lines(start, h);
 
-        let items: Vec<ListItem> = lines 
-            .into_iter()
-            .map(|ansi_line| ListItem::new(ansi_line.into_text().unwrap()))
-            .collect();
+        let items: Vec<ListItem> = match colored {
+            true => lines 
+                .into_iter()
+                .map(|ansi_line| ListItem::new(ansi_line.into_text().unwrap()))
+                .collect(),
+            false => lines 
+                .into_iter()
+                .map(|line| ListItem::new(line))
+                .collect()
+        };
         
         let list = List::new(items)
             .block(
@@ -235,8 +262,8 @@ impl Widget for &mut App {
 
         // fill input area
         let content = match self.app_mode {
-            AppMode::Left => self.search_string.as_str(),
-            AppMode::Right(_) => self.search_string.as_str(),
+            AppMode::Left | AppMode::Right(ViewerMode::Normal) => self.search_string.as_str(),
+            AppMode::Right(ViewerMode::Search) => self.viewer.as_mut().unwrap().search_string.as_str(),
         };
 
         let input = Paragraph::new(content)
